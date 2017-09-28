@@ -65,6 +65,28 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+Eigen::VectorXd globalKinematic(Eigen::VectorXd state,
+                                Eigen::VectorXd actuators, double dt) {
+  Eigen::VectorXd next_state(state.size());
+
+  double x = state[0];
+  double y = state[1];
+  double psi = state[2];
+  double v = state[3];
+  double delta = actuators[0];
+  double a = actuators[1];
+  double Lf = 2.67;
+
+  next_state[0] = x + v*cos(psi)*dt;
+  next_state[1] = y + v*sin(psi)*dt;
+  next_state[2] = psi + v/Lf * delta * dt;
+  next_state[3] = v + a*dt;
+
+  return next_state;
+}
+
+
+
 int main() {
   uWS::Hub h;
 
@@ -98,18 +120,82 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          // reference to the quiz in the class
+
+//          //---- consider the latency -----
+          Eigen::VectorXd state_temp(4);
+          Eigen::VectorXd actuators_temp(2);
+          state_temp << px, py, psi, v;
+          actuators_temp << 0, 0;
+          auto next_state_latency = globalKinematic(state_temp, actuators_temp, 0.1);
+
+          Eigen::VectorXd ptsx_eigen(ptsx.size());
+          Eigen::VectorXd ptsy_eigen(ptsy.size());
+
+          //---- Transformed waypoints into the vehicle frame -----
+          for(unsigned int k=0; k< ptsx.size(); k++){
+            double x = ptsx[k] - px;
+            double y = ptsy[k] - py;
+
+            ptsx_eigen[k] = cos(psi)*x + sin(psi)*y;
+            ptsy_eigen[k] = -sin(psi)*x + cos(psi)*y;
+//              ptsx_eigen[k] = ptsx[k];
+//              ptsy_eigen[k] = ptsy[k];
+
+          }
+
+//          for(unsigned int xi=0; xi<ptsx.size(); xi++){
+//            ptsx_eigen[xi] = ptsx[xi];
+//          }
+//          for(unsigned int yi=0; yi<ptsx.size(); yi++){
+//            ptsy_eigen[yi] = ptsy[yi];
+//          }
+          auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
+
+          // The cross track error is calculated by evaluating at polynomial at x, f(x)
+          // and subtracting y.
+          double predicted_y = polyeval(coeffs, ptsx_eigen[0]); //px?
+          double cte = predicted_y - ptsy_eigen[0]; //py?
+          // Due to the sign starting at 0, the orientation error is -f'(x).
+          // derivative of coeffs[0] + coeffs[1] * x -> coeffs[1]
+          double epsi = psi - atan(coeffs[1]);
+
+          Eigen::VectorXd state(6);
+//          state << px, py, psi, v, cte, epsi;
+          // [x, y, psi, v]
+
+          state << 0,0, 0, v, cte, epsi;
+          vector<double> mpc_x_vals;
+          vector<double> mpc_y_vals;
+
+          double steer_value=0;
+          double throttle_value=0;
+          for (unsigned int k=0; k<1;k++){
+            auto vars = mpc.Solve(state, coeffs);
+            mpc_x_vals.push_back(vars[0]);
+            mpc_y_vals.push_back(vars[1]);
+            state << ptsx_eigen[k],ptsy_eigen[k], vars[2], vars[3], vars[4], vars[5];
+            if(k==0){
+              steer_value = -vars[6];
+              throttle_value = vars[7];
+            }
+
+          }
+
+
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
+
+          steer_value = steer_value/deg2rad(25);
+
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
+
           //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -120,6 +206,14 @@ int main() {
           //Display the waypoints/reference line
           vector<double> next_x_vals;
           vector<double> next_y_vals;
+
+          for(unsigned int k=0; k< 30; k++){
+            predicted_y = polyeval(coeffs, k*2.0);
+            next_x_vals.push_back(k*2.0);
+            next_y_vals.push_back(predicted_y);
+          }
+
+
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line

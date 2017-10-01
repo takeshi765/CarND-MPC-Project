@@ -131,7 +131,8 @@ int main() {
 
           Eigen::VectorXd ptsx_eigen(ptsx.size());
           Eigen::VectorXd ptsy_eigen(ptsy.size());
-
+          px = next_state_latency[0];
+          py = next_state_latency[1];
           //---- Transformed waypoints into the vehicle frame -----
           for(unsigned int k=0; k< ptsx.size(); k++){
             double x = ptsx[k] - px;
@@ -170,17 +171,27 @@ int main() {
 
           double steer_value=0;
           double throttle_value=0;
-          for (unsigned int k=0; k<1;k++){
-            auto vars = mpc.Solve(state, coeffs);
-            mpc_x_vals.push_back(vars[0]);
-            mpc_y_vals.push_back(vars[1]);
-            state << ptsx_eigen[k],ptsy_eigen[k], vars[2], vars[3], vars[4], vars[5];
-            if(k==0){
-              steer_value = -vars[6];
-              throttle_value = vars[7];
-            }
 
+          auto vars = mpc.Solve(state, coeffs);
+
+          for (unsigned int n=0; n<(unsigned int)(vars.size()/8); n++){
+            mpc_x_vals.push_back(vars[0+8*n]);
+            mpc_y_vals.push_back(vars[1+8*n]);
           }
+          steer_value = -vars[6];
+          throttle_value = vars[7];
+
+//          for (unsigned int k=0; k<1;k++){
+//            auto vars = mpc.Solve(state, coeffs);
+//            mpc_x_vals.push_back(vars[0]);
+//            mpc_y_vals.push_back(vars[1]);
+//            state << ptsx_eigen[k],ptsy_eigen[k], vars[2], vars[3], vars[4], vars[5];
+//            if(k==0){
+//              steer_value = -vars[6];
+//              throttle_value = vars[7];
+//            }
+//
+//          }
 
 
 
@@ -207,7 +218,7 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          for(unsigned int k=0; k< 30; k++){
+          for(unsigned int k=0; k< 20; k++){
             predicted_y = polyeval(coeffs, k*2.0);
             next_x_vals.push_back(k*2.0);
             next_y_vals.push_back(predicted_y);

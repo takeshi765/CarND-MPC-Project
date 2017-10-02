@@ -178,7 +178,7 @@ int main() {
           double cte = predicted_y - initial_y; //py?
 
           // Due to the sign starting at 0, the orientation error is -f'(x).
-          double epsi = initial_psi - atan(3.0*coeffs[3]*initial_x*initial_x+2.0*coeffs[2]*initial_x + coeffs[1]*initial_x);
+          double epsi = initial_psi - atan(3.0*coeffs[3]*initial_x*initial_x+2.0*coeffs[2]*initial_x + coeffs[1]);
 
           // solve MPC
           state << initial_x, initial_y, initial_psi, initial_v, cte, epsi;

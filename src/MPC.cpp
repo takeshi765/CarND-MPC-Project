@@ -59,10 +59,13 @@ class FG_eval {
     // Any additions to the cost should be added to `fg[0]`.
     fg[0] = 0;
 
+    double w_epsi = 20.0;
+
+
     // The part of the cost based on the reference state.
     for (unsigned int t = 0; t < N; t++) {
       fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += 20.0*CppAD::pow(vars[epsi_start + t], 2);
+      fg[0] += w_epsi*CppAD::pow(vars[epsi_start + t], 2);
       fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
 

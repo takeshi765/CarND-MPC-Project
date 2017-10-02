@@ -25,7 +25,7 @@ const double Lf = 2.67;
 //---- Reference to the quiz in the class ---
 // Both the reference cross track and orientation errors are 0.
 // The reference velocity is set to 50 mph.
-double ref_v = 50;
+double ref_v = 80;
 
 //---- Reference to the quiz in the class ---
 // The solver takes all the state variables and actuator

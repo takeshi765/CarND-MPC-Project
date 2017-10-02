@@ -74,14 +74,34 @@ Eigen::VectorXd globalKinematic(Eigen::VectorXd state,
   double y = state[1];
   double psi = state[2];
   double v = state[3];
+//  v*=0.44704;
+  double cte = state[4];
+  double epsi = state[5];
   double delta = actuators[0];
   double a = actuators[1];
   double Lf = 2.67;
 
-  next_state[0] = x + v*cos(psi)*dt;
-  next_state[1] = y + v*sin(psi)*dt;
-  next_state[2] = psi - v/Lf * delta * dt;
-  next_state[3] = v + a*dt;
+//  next_state[0] = x + v*cos(psi)*dt;
+//  next_state[1] = y + v*sin(psi)*dt;
+//  next_state[2] = psi + v/Lf * delta * dt;
+//  next_state[3] = v + a*dt;
+//  next_state[5] = epsi + v*delta*dt/Lf;
+//  next_state[4] = cte + v*delta*dt/Lf;
+
+    x = x + v*cos(psi)*dt;
+    y = y + v*sin(psi)*dt;
+    psi  =  psi + v*delta*dt/Lf;
+    epsi = epsi + v*delta*dt/Lf;
+    cte = cte + v*sin(epsi)*dt;
+    v = v + a*dt;
+
+    next_state[0] = x;
+    next_state[1] = y;
+    next_state[2] = psi;
+    next_state[3] = v;
+    next_state[4] = cte;
+    next_state[5] = epsi;
+
 
   return next_state;
 }
@@ -118,7 +138,8 @@ int main() {
 //          v = v * 0.44704;
 
           double steering = j[1]["steering_angle"];
-          steering = steering * deg2rad(25);
+          steering = -steering;
+//          steering = steering * deg2rad(25);
           double throt = j[1]["throttle"];
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -153,16 +174,31 @@ int main() {
           double initial_psi = 0;
           double initial_v = v;
 
+          // The cross track error is calculated by evaluating at polynomial at x, f(x)
+          // and subtracting y.
+          double predicted_y = polyeval(coeffs,initial_x);
+//          double cte = predicted_y - initial_y;
+          double cte = predicted_y; //because px=py=0 after transformation
+
+          // Due to the sign starting at 0, the orientation error is -f'(x).
+          double epsi = -atan(coeffs[1]);
+//          double epsi = initial_psi - atan(3.0*coeffs[3]*initial_x*initial_x+2.0*coeffs[2]*initial_x + coeffs[1]);
+
+          double initial_cte = cte;
+          double initial_epsi = epsi;
+
           if(use_latency){
-            Eigen::VectorXd state_temp(4);
+            Eigen::VectorXd state_temp(6);
             Eigen::VectorXd actuators_temp(2);
-            state_temp << 0, 0, 0, v;
+            state_temp << 0, 0, 0, v, cte, epsi;
             actuators_temp << steering, throt;
             auto next_state_latency = globalKinematic(state_temp, actuators_temp, 0.1);
             initial_x = next_state_latency[0];
             initial_y = next_state_latency[1];
             initial_psi = next_state_latency[2];
             initial_v = next_state_latency[3];
+            initial_cte = next_state_latency[4];
+            initial_epsi = next_state_latency[5];
             //        double nx =next_state_latency[0] - px;
             //        double ny =next_state_latency[1] - py;
             //
@@ -172,16 +208,9 @@ int main() {
             //        state << nx2, ny2, npsi2, v, cte, epsi;  //latency
           }
 
-          // The cross track error is calculated by evaluating at polynomial at x, f(x)
-          // and subtracting y.
-          double predicted_y = polyeval(coeffs,initial_x); //px?
-          double cte = predicted_y - initial_y; //py?
-
-          // Due to the sign starting at 0, the orientation error is -f'(x).
-          double epsi = initial_psi - atan(3.0*coeffs[3]*initial_x*initial_x+2.0*coeffs[2]*initial_x + coeffs[1]);
 
           // solve MPC
-          state << initial_x, initial_y, initial_psi, initial_v, cte, epsi;
+          state << initial_x, initial_y, initial_psi, initial_v, initial_cte, initial_epsi;
 //          std::cout << "initial_state for MPC=" << state << std::endl;
 //          std::cout << "throt" << throt << std::endl;
 //          std::cout << "steering" << steering << std::endl;;

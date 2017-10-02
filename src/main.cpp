@@ -17,6 +17,7 @@ constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
 
+
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
 // else the empty string "" will be returned.
@@ -79,7 +80,7 @@ Eigen::VectorXd globalKinematic(Eigen::VectorXd state,
 
   next_state[0] = x + v*cos(psi)*dt;
   next_state[1] = y + v*sin(psi)*dt;
-  next_state[2] = psi + v/Lf * delta * dt;
+  next_state[2] = psi - v/Lf * delta * dt;
   next_state[3] = v + a*dt;
 
   return next_state;
@@ -105,6 +106,7 @@ int main() {
       if (s != "") {
         auto j = json::parse(s);
         string event = j[0].get<string>();
+
         if (event == "telemetry") {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
@@ -113,7 +115,11 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+//          v = v * 0.44704;
 
+          double steering = j[1]["steering_angle"];
+          steering = steering * deg2rad(25);
+          double throt = j[1]["throttle"];
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
@@ -121,79 +127,67 @@ int main() {
           *
           */
           // reference to the quiz in the class
-
-//          //---- consider the latency -----
-          Eigen::VectorXd state_temp(4);
-          Eigen::VectorXd actuators_temp(2);
-          state_temp << px, py, psi, v;
-          actuators_temp << 0, 0;
-          auto next_state_latency = globalKinematic(state_temp, actuators_temp, 0.1);
-
           Eigen::VectorXd ptsx_eigen(ptsx.size());
           Eigen::VectorXd ptsy_eigen(ptsy.size());
-          px = next_state_latency[0];
-          py = next_state_latency[1];
+
+          Eigen::VectorXd state(6);
+          vector<double> mpc_x_vals;
+          vector<double> mpc_y_vals;
+          double steer_value=0;
+          double throttle_value=0;
+
           //---- Transformed waypoints into the vehicle frame -----
           for(unsigned int k=0; k< ptsx.size(); k++){
             double x = ptsx[k] - px;
             double y = ptsy[k] - py;
-
             ptsx_eigen[k] = cos(psi)*x + sin(psi)*y;
             ptsy_eigen[k] = -sin(psi)*x + cos(psi)*y;
-//              ptsx_eigen[k] = ptsx[k];
-//              ptsy_eigen[k] = ptsy[k];
-
           }
-
-//          for(unsigned int xi=0; xi<ptsx.size(); xi++){
-//            ptsx_eigen[xi] = ptsx[xi];
-//          }
-//          for(unsigned int yi=0; yi<ptsx.size(); yi++){
-//            ptsy_eigen[yi] = ptsy[yi];
-//          }
+          //Fit polynomial to the way points
           auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
+
+          //---- consider the latency -----
+          bool use_latency = true;
+          double initial_x = 0; //ptsx_eigen[0];
+          double initial_y = 0; //ptsy_eigen[0];
+          double initial_psi = 0;
+          double initial_v = v;
+
+          if(use_latency){
+            Eigen::VectorXd state_temp(4);
+            Eigen::VectorXd actuators_temp(2);
+            state_temp << 0, 0, 0, v;
+            actuators_temp << steering, throt;
+            auto next_state_latency = globalKinematic(state_temp, actuators_temp, 0.1);
+            initial_x = next_state_latency[0];
+            initial_y = next_state_latency[1];
+            initial_psi = next_state_latency[2];
+            initial_v = next_state_latency[3];
+            //        double nx =next_state_latency[0] - px;
+            //        double ny =next_state_latency[1] - py;
+            //
+            //        double nx2 = cos(psi)*nx + sin(psi)*ny;
+            //        double ny2 = -sin(psi)*nx + cos(psi)*ny;
+            //        double npsi2 =next_state_latency[2] - psi;
+            //        state << nx2, ny2, npsi2, v, cte, epsi;  //latency
+          }
 
           // The cross track error is calculated by evaluating at polynomial at x, f(x)
           // and subtracting y.
-          double predicted_y = polyeval(coeffs, ptsx_eigen[0]); //px?
-          double cte = predicted_y - ptsy_eigen[0]; //py?
+          double predicted_y = polyeval(coeffs,initial_x); //px?
+          double cte = predicted_y - initial_y; //py?
+
           // Due to the sign starting at 0, the orientation error is -f'(x).
-          // derivative of coeffs[0] + coeffs[1] * x -> coeffs[1]
-          double epsi = psi - atan(coeffs[1]);
+          double epsi = initial_psi - atan(3.0*coeffs[3]*initial_x*initial_x+2.0*coeffs[2]*initial_x + coeffs[1]*initial_x);
 
-          Eigen::VectorXd state(6);
-//          state << px, py, psi, v, cte, epsi;
-          // [x, y, psi, v]
-
-          state << 0,0, 0, v, cte, epsi;
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
-
-          double steer_value=0;
-          double throttle_value=0;
-
+          // solve MPC
+          state << initial_x, initial_y, initial_psi, initial_v, cte, epsi;
+//          std::cout << "initial_state for MPC=" << state << std::endl;
+//          std::cout << "throt" << throt << std::endl;
+//          std::cout << "steering" << steering << std::endl;;
           auto vars = mpc.Solve(state, coeffs);
-
-          for (unsigned int n=0; n<(unsigned int)(vars.size()/8); n++){
-            mpc_x_vals.push_back(vars[0+8*n]);
-            mpc_y_vals.push_back(vars[1+8*n]);
-          }
-          steer_value = -vars[6];
-          throttle_value = vars[7];
-
-//          for (unsigned int k=0; k<1;k++){
-//            auto vars = mpc.Solve(state, coeffs);
-//            mpc_x_vals.push_back(vars[0]);
-//            mpc_y_vals.push_back(vars[1]);
-//            state << ptsx_eigen[k],ptsy_eigen[k], vars[2], vars[3], vars[4], vars[5];
-//            if(k==0){
-//              steer_value = -vars[6];
-//              throttle_value = vars[7];
-//            }
-//
-//          }
-
-
+          steer_value    = -vars[6];
+          throttle_value =  vars[7];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -206,11 +200,12 @@ int main() {
 
 
           //Display the MPC predicted trajectory 
-
-
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
-
+          for (unsigned int n=0; n<(unsigned int)(vars.size()/8); n++){
+            mpc_x_vals.push_back(vars[0+8*n]);
+            mpc_y_vals.push_back(vars[1+8*n]);
+          }
           msgJson["mpc_x"] = mpc_x_vals;
           msgJson["mpc_y"] = mpc_y_vals;
 
@@ -218,23 +213,19 @@ int main() {
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          for(unsigned int k=0; k< 20; k++){
+          for(unsigned int k=0; k< 30; k++){
             predicted_y = polyeval(coeffs, k*2.0);
             next_x_vals.push_back(k*2.0);
             next_y_vals.push_back(predicted_y);
           }
 
-
-
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
-
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
-
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+//          std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
